@@ -8,4 +8,5 @@ langchain-groq
 langchain-community
 langchain-text-splitters
 faiss-cpu
+sentence-transformers
 fastembed
