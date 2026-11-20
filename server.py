@@ -2,6 +2,9 @@
 Run:  uvicorn server:app --reload     then open http://localhost:8000
 """
 import io, json, os
+
+import httpx
+import numpy as np
 from typing import List, TypedDict
 
 from dotenv import load_dotenv
@@ -10,8 +13,6 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from langgraph.graph import END, StateGraph
 from langchain_groq import ChatGroq
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 
@@ -19,7 +20,40 @@ load_dotenv()
 
 llm = ChatGroq(api_key=os.getenv("GROQ_API_KEY"), model="openai/gpt-oss-120b",
                temperature=0, max_tokens=2048)
-embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+# ---- Lightweight vector store: Gemini embeddings (API) + numpy. No torch, no FAISS, ~150 MB RAM ----
+EMB_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:batchEmbedContents"
+DIM = 768
+
+
+def embed(texts, task):
+    """task: RETRIEVAL_DOCUMENT for chunks, RETRIEVAL_QUERY for questions."""
+    out = []
+    with httpx.Client(timeout=60) as c:
+        for i in range(0, len(texts), 100):  # API accepts up to 100 per batch
+            reqs = [{"model": "models/gemini-embedding-001", "content": {"parts": [{"text": t}]},
+                     "taskType": task, "outputDimensionality": DIM} for t in texts[i:i + 100]]
+            r = c.post(EMB_URL, headers={"x-goog-api-key": os.getenv("GEMINI_API_KEY", "")}, json={"requests": reqs})
+            r.raise_for_status()
+            out += [e["values"] for e in r.json()["embeddings"]]
+    v = np.array(out, dtype="float32")
+    return v / np.linalg.norm(v, axis=1, keepdims=True)  # truncated dims must be re-normalised
+
+
+class Store:
+    def __init__(self):
+        self.docs, self.vecs = [], np.zeros((0, DIM), dtype="float32")
+
+    def add(self, docs):
+        v = embed([d.page_content for d in docs], "RETRIEVAL_DOCUMENT")
+        self.vecs = np.vstack([self.vecs, v])
+        self.docs += docs
+
+    def search(self, q, k=3):
+        if not self.docs:
+            return []
+        scores = self.vecs @ embed([q], "RETRIEVAL_QUERY")[0]
+        return [self.docs[i] for i in np.argsort(-scores)[:k]]
+
 
 SAMPLE = [
     "LangGraph is a library for building stateful, multi-actor applications with LLMs. It extends LangChain with the ability to coordinate multiple chains across multiple steps of computation in a cyclic manner.",
@@ -27,10 +61,8 @@ SAMPLE = [
     "Vector databases store high-dimensional vectors and enable efficient similarity search. They are commonly used in RAG systems to find relevant documents based on semantic similarity.",
     "Agentic systems are AI systems that can take actions, make decisions, and interact with their environment autonomously. They often use planning and reasoning capabilities.",
 ]
-vectorstore = FAISS.from_documents(
-    [Document(page_content=t, metadata={"source": "sample-knowledge"}) for t in SAMPLE], embeddings)
-# Fix: as_retriever(k=3) is silently ignored; k belongs in search_kwargs
-retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+store = Store()
+store.add([Document(page_content=t, metadata={"source": "sample-knowledge"}) for t in SAMPLE])
 DOCS = {"sample-knowledge": len(SAMPLE)}  # filename -> chunk count
 
 
@@ -49,7 +81,7 @@ def decide_retrieval(state: AgentState):
 
 
 def retrieve_documents(state: AgentState):
-    return {"documents": retriever.invoke(state["question"])}
+    return {"documents": store.search(state["question"], k=3)}
 
 
 async def generate_answer(state: AgentState):
@@ -137,14 +169,17 @@ async def upload(file: UploadFile = File(...), chunk_size: int = Form(800), chun
     size = max(100, chunk_size)
     sp = RecursiveCharacterTextSplitter(chunk_size=size, chunk_overlap=max(0, min(chunk_overlap, size // 2)))
     chunks = sp.create_documents([text], metadatas=[{"source": file.filename}])
-    vectorstore.add_documents(chunks)
+    try:
+        store.add(chunks)
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"Embedding API error: {e}")
     DOCS[file.filename] = DOCS.get(file.filename, 0) + len(chunks)
-    return {"chunks": len(chunks), "total": vectorstore.index.ntotal}
+    return {"chunks": len(chunks), "total": len(store.docs)}
 
 
 @app.get("/api/stats")
 async def stats():
-    return {"total": vectorstore.index.ntotal, "docs": [{"name": k, "chunks": v} for k, v in DOCS.items()]}
+    return {"total": len(store.docs), "docs": [{"name": k, "chunks": v} for k, v in DOCS.items()]}
 
 
 @app.get("/")
