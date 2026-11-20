@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agentic RAG Chat</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+<style>
+:root{--bg:#f6f7f9;--side:#eceef2;--surf:#fff;--ink:#171a20;--mut:#6a7280;--line:#dde0e6;--acc:#0b8f7e;--acc-i:#fff;--user:#e4e8ee;--code:#12161c;--err:#c43b3b}
+:root[data-theme=dark]{--bg:#0e1116;--side:#12161c;--surf:#171c24;--ink:#e8ebf0;--mut:#8b94a3;--line:#262d38;--acc:#3ddbc0;--acc-i:#06241f;--user:#1f2631;--code:#0a0d11;--err:#ff7b7b}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{font:15px/1.6 Figtree,system-ui,sans-serif;background:var(--bg);color:var(--ink);display:flex;overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+aside{width:272px;background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:12px;gap:8px;flex-shrink:0;transition:transform .2s}
+.new{display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:10px;background:var(--acc);color:var(--acc-i);font-weight:600}
+#list{flex:1;overflow:auto;display:flex;flex-direction:column;gap:2px}
+.ci{display:flex;align-items:center;border-radius:8px;padding:0 4px 0 10px}
+.ci:hover,.ci.on{background:var(--surf)}
+.ci button.t{flex:1;text-align:left;padding:8px 0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.ci .x{opacity:0;padding:4px 8px;color:var(--mut)}.ci:hover .x{opacity:1}
+.foot{display:flex;gap:6px;color:var(--mut);font-size:13px}
+.foot button{padding:7px 10px;border:1px solid var(--line);border-radius:8px}.foot button:hover{color:var(--ink)}
+main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
+header{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line)}
+header .menu{display:none;font-size:20px}
+header h1{font-size:15px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kb{font-size:12.5px;color:var(--mut);border:1px solid var(--line);border-radius:99px;padding:3px 10px}
+#scroll{flex:1;overflow:auto;scroll-behavior:smooth}
+.wrap{max-width:760px;margin:0 auto;padding:24px 16px 8px}
+.empty{text-align:center;padding-top:12vh}
+.empty h2{font-size:28px;font-weight:600;letter-spacing:-.02em;margin-bottom:6px}
+.empty p{color:var(--mut);margin-bottom:24px}
+.chips{display:grid;grid-template-columns:1fr 1fr;gap:10px;text-align:left}
+.chips button{border:1px solid var(--line);background:var(--surf);border-radius:12px;padding:12px 14px}
+.chips button:hover{border-color:var(--acc)}
+.chips small{display:block;color:var(--mut);font-size:12.5px}
+.msg{margin:18px 0;display:flex;flex-direction:column}
+.msg.user{align-items:flex-end}
+.msg.user .b{background:var(--user);padding:9px 14px;border-radius:18px 18px 4px 18px;max-width:85%;white-space:pre-wrap;overflow-wrap:anywhere}
+.msg.ai .md{overflow-wrap:anywhere}
+.md p{margin:.6em 0}.md ul,.md ol{padding-left:1.4em}.md li{margin:.2em 0}
+.md code{font-family:'JetBrains Mono',monospace;font-size:.88em;background:var(--user);padding:1px 5px;border-radius:5px}
+.md pre{position:relative;background:var(--code);color:#e6e9ee;border-radius:10px;padding:14px;overflow:auto;margin:.8em 0}
+.md pre code{background:none;padding:0;color:inherit}
+.md pre button{position:absolute;top:6px;right:6px;font-size:12px;color:#9aa3b2;border:1px solid #2c3441;border-radius:6px;padding:2px 8px}
+.md table{border-collapse:collapse}.md td,.md th{border:1px solid var(--line);padding:5px 10px}
+.cur::after{content:"";display:inline-block;width:8px;height:1em;background:var(--acc);margin-left:2px;vertical-align:-2px;animation:bl 1s steps(2) infinite}
+@keyframes bl{50%{opacity:0}}
+.acts{display:flex;gap:4px;margin-top:4px;color:var(--mut);font-size:13px}
+.acts button{padding:3px 8px;border-radius:6px}.acts button:hover{background:var(--user);color:var(--ink)}
+/* agent trace: the signature element */
+.trace{border:1px solid var(--line);background:var(--surf);border-radius:12px;padding:8px 12px;margin-bottom:6px;font-size:13px}
+.pipe{display:flex;align-items:center;gap:6px;color:var(--mut);cursor:pointer;user-select:none}
+.node{display:flex;align-items:center;gap:6px;padding:2px 8px;border-radius:99px;border:1px solid var(--line)}
+.node i{width:7px;height:7px;border-radius:50%;background:var(--line)}
+.node.running{color:var(--ink);border-color:var(--acc)}.node.running i{background:var(--acc);animation:pu 1s infinite}
+.node.done{color:var(--ink)}.node.done i{background:var(--acc)}
+.node.skipped{text-decoration:line-through;opacity:.6}
+.ln{width:14px;height:1px;background:var(--line)}
+@keyframes pu{50%{transform:scale(1.7);opacity:.5}}
+.src{display:none;margin-top:8px;gap:6px;flex-direction:column}
+.trace.open .src{display:flex}
+.src div{border-left:2px solid var(--acc);padding:2px 10px;color:var(--mut)}
+.src b{color:var(--ink);font-weight:500}
+.err{color:var(--err)}
+footer{padding:8px 16px 14px}
+.box{max-width:760px;margin:0 auto;display:flex;align-items:flex-end;gap:6px;background:var(--surf);border:1px solid var(--line);border-radius:22px;padding:6px 6px 6px 10px}
+.box:focus-within{border-color:var(--acc)}
+.box textarea{flex:1;border:0;outline:0;background:none;color:inherit;font:inherit;resize:none;max-height:200px;padding:8px 4px}
+.ib{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font-size:18px;color:var(--mut)}
+.ib:hover{background:var(--user)}
+#send{background:var(--acc);color:var(--acc-i)}#send:disabled{opacity:.35;cursor:default}
+.hint{max-width:760px;margin:6px auto 0;text-align:center;font-size:12px;color:var(--mut)}
+#down{position:absolute;bottom:100px;left:50%;transform:translateX(-50%);background:var(--surf);border:1px solid var(--line);border-radius:99px;padding:4px 12px;font-size:13px;display:none}
+#toast{position:fixed;bottom:90px;left:50%;transform:translate(-50%,20px);background:var(--ink);color:var(--bg);padding:8px 16px;border-radius:10px;opacity:0;transition:.25s;pointer-events:none;font-size:14px}
+#toast.on{opacity:1;transform:translate(-50%,0)}
+@media(max-width:760px){aside{position:fixed;inset:0 auto 0 0;z-index:5;transform:translateX(-100%)}aside.open{transform:none;box-shadow:0 0 0 100vmax #0006}header .menu{display:block}.chips{grid-template-columns:1fr}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<aside id="side">
+  <button class="new" id="new">＋ New chat</button>
+  <div id="list"></div>
+  <div class="foot"><button id="theme">Theme</button><button id="clear">Clear all</button></div>
+</aside>
+<main>
+  <header><button class="menu" id="menu" aria-label="Menu">☰</button><h1 id="title">New chat</h1><span class="kb" id="kb">Knowledge base</span></header>
+  <div id="scroll"><div class="wrap" id="msgs"></div></div>
+  <button id="down">↓ Latest</button>
+  <footer>
+    <div class="box">
+      <input type="file" id="file" accept=".txt,.md,.pdf" hidden>
+      <button class="ib" id="attach" title="Add a document to the knowledge base" aria-label="Add document">📎</button>
+      <textarea id="in" rows="1" placeholder="Ask anything" aria-label="Message"></textarea>
+      <button class="ib" id="send" aria-label="Send">↑</button>
+    </div>
+    <div class="hint">Enter to send · Shift+Enter for a new line · Ctrl+K for a new chat</div>
+  </footer>
+</main>
+<div id="toast"></div>
+<script>
+const $=s=>document.querySelector(s), esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const md=t=>{try{return DOMPurify.sanitize(marked.parse(t))}catch(e){return '<p>'+esc(t)+'</p>'}};
+const store={get:()=>{try{return JSON.parse(localStorage.getItem('chats'))||[]}catch(e){return[]}},set:v=>{try{localStorage.setItem('chats',JSON.stringify(v))}catch(e){}}};
+let chats=store.get(), cur=null, ctrl=null, busy=false;
+const NODES=[['decide','Decide'],['retrieve','Retrieve'],['generate','Answer']];
+const SUG=[['What is LangGraph?','Retrieves from the knowledge base'],['How does RAG work?','Retrieves from the knowledge base'],['Who are you?','Skips retrieval, answers directly'],['Will India become a global superpower?','Skips retrieval, answers directly']];
+const toast=m=>{const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('on'),2600)};
+const save=()=>store.set(chats);
+const chat=()=>chats.find(c=>c.id===cur);
+
+function newChat(){const c={id:Date.now().toString(36),title:'New chat',messages:[]};chats.unshift(c);cur=c.id;save();draw();$('#in').focus();$('#side').classList.remove('open')}
+function drawList(){$('#list').innerHTML='';chats.forEach(c=>{const d=document.createElement('div');d.className='ci'+(c.id===cur?' on':'');
+  d.innerHTML=`<button class="t">${esc(c.title)}</button><button class="x" aria-label="Delete chat">✕</button>`;
+  d.querySelector('.t').onclick=()=>{if(busy)return;cur=c.id;draw();$('#side').classList.remove('open')};
+  d.querySelector('.x').onclick=()=>{if(busy)return;chats=chats.filter(x=>x.id!==c.id);if(cur===c.id)cur=chats[0]?.id;if(!cur)return newChat();save();draw()};
+  $('#list').append(d)})}
+function traceEl(t){const d=document.createElement('div');d.className='trace';
+  d.innerHTML='<div class="pipe" tabindex="0" role="button" title="Show retrieved sources">'+NODES.map(([k,l])=>`<span class="node ${t[k]||''}"><i></i>${l}</span>`).join('<span class="ln"></span>')+
+  `</div><div class="src">${(t.sources||[]).map(s=>`<div><b>${esc(s.source)}</b><br>${esc(s.text.slice(0,220))}${s.text.length>220?'…':''}</div>`).join('')||'<div>No documents retrieved for this question.</div>'}</div>`;
+  const p=d.querySelector('.pipe'),tg=()=>d.classList.toggle('open');p.onclick=tg;p.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();tg()}};return d}
+function msgEl(m,i,last){const d=document.createElement('div');d.className='msg '+(m.role==='user'?'user':'ai');
+  if(m.role==='user'){d.innerHTML=`<div class="b">${esc(m.content)}</div>`;return d}
+  if(m.trace)d.append(traceEl(m.trace));
+  const b=document.createElement('div');b.className='md';b.innerHTML=md(m.content);if(m.err){b.innerHTML+=`<p class="err">${esc(m.err)}</p>`}fixCode(b);d.append(b);
+  const a=document.createElement('div');a.className='acts';a.innerHTML='<button data-a="copy">Copy</button>'+(last?'<button data-a="regen">Regenerate</button>':'');
+  a.onclick=e=>{const k=e.target.dataset.a;if(k==='copy'){navigator.clipboard.writeText(m.content);toast('Copied')}if(k==='regen')regen()};
+  d.append(a);return d}
+function fixCode(root){root.querySelectorAll('pre').forEach(p=>{const b=document.createElement('button');b.textContent='Copy';b.onclick=()=>{navigator.clipboard.writeText(p.innerText.replace(/Copy$/,'').trim());b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1500)};p.append(b)})}
+function draw(){const c=chat();$('#title').textContent=c.title;drawList();const w=$('#msgs');w.innerHTML='';
+  if(!c.messages.length){w.innerHTML='<div class="empty"><h2>What do you want to know?</h2><p>Answers come from your knowledge base when it helps, and from the model when it doesn’t.</p><div class="chips"></div></div>';
+    SUG.forEach(([q,s])=>{const b=document.createElement('button');b.innerHTML=`${esc(q)}<small>${s}</small>`;b.onclick=()=>send(q);w.querySelector('.chips').append(b)})}
+  c.messages.forEach((m,i)=>w.append(msgEl(m,i,i===c.messages.length-1&&!busy)));toBottom(true)}
+function toBottom(f){const s=$('#scroll');if(f||s.scrollHeight-s.scrollTop-s.clientHeight<140)s.scrollTop=s.scrollHeight}
+
+function setBusy(v){busy=v;const b=$('#send');b.textContent=v?'■':'↑';b.setAttribute('aria-label',v?'Stop':'Send');b.disabled=false}
+async function run(c){
+  const m={role:'assistant',content:'',trace:{sources:[]}};c.messages.push(m);setBusy(true);draw();
+  const w=$('#msgs'),el=w.lastElementChild,md_=()=>el.querySelector('.md');md_().classList.add('cur');
+  const q=c.messages[c.messages.length-2].content, hist=c.messages.slice(0,-2).map(x=>({role:x.role==='user'?'user':'assistant',content:x.content}));
+  ctrl=new AbortController();
+  try{
+    const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,history:hist}),signal:ctrl.signal});
+    if(!r.ok)throw new Error('Server returned '+r.status);
+    const rd=r.body.getReader(),dec=new TextDecoder();let buf='';
+    for(;;){const {done,value}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});const parts=buf.split('\n\n');buf=parts.pop();
+      for(const p of parts){if(!p.startsWith('data: '))continue;const e=JSON.parse(p.slice(6));
+        if(e.type==='step'){m.trace[e.node]=e.status;el.querySelector('.trace').replaceWith(traceEl(m.trace))}
+        else if(e.type==='sources'){m.trace.sources=e.items;el.querySelector('.trace').replaceWith(traceEl(m.trace))}
+        else if(e.type==='token'){m.content+=e.text;md_().innerHTML=md(m.content);toBottom()}
+        else if(e.type==='error')throw new Error(e.message)}}
+  }catch(e){if(e.name!=='AbortError')m.err='Something went wrong: '+e.message+'. Check that the server is running and GROQ_API_KEY is set.'}
+  m.stopped=ctrl.signal.aborted;if(!m.content&&!m.err&&m.stopped)m.content='_Stopped._';
+  ctrl=null;setBusy(false);save();draw();
+}
+function send(text){if(busy)return;text=(text||'').trim();if(!text)return;const c=chat();
+  if(!c.messages.length)c.title=text.slice(0,42);c.messages.push({role:'user',content:text});$('#in').value='';grow();run(c)}
+function regen(){if(busy)return;const c=chat();if(c.messages.at(-1)?.role==='assistant')c.messages.pop();run(c)}
+const ta=$('#in');function grow(){ta.style.height='auto';ta.style.height=Math.min(ta.scrollHeight,200)+'px'}
+ta.oninput=grow;
+ta.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();send(ta.value)}};
+$('#send').onclick=()=>busy?ctrl?.abort():send(ta.value);
+$('#new').onclick=()=>{if(!busy)newChat()};
+$('#menu').onclick=()=>$('#side').classList.toggle('open');
+$('#clear').onclick=()=>{if(!busy&&confirm('Delete all chats?')){chats=[];newChat()}};
+$('#theme').onclick=()=>{const d=document.documentElement,n=d.dataset.theme==='dark'?'light':'dark';d.dataset.theme=n;try{localStorage.setItem('theme',n)}catch(e){}};
+document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();if(!busy)newChat()}});
+$('#scroll').onscroll=e=>{const s=e.target;$('#down').style.display=s.scrollHeight-s.scrollTop-s.clientHeight>240?'block':'none'};
+$('#down').onclick=()=>toBottom(true);
+$('#attach').onclick=()=>$('#file').click();
+$('#file').onchange=async e=>{const f=e.target.files[0];if(!f)return;const fd=new FormData();fd.append('file',f);toast('Indexing '+f.name+'…');
+  try{const r=await fetch('/api/upload',{method:'POST',body:fd}),j=await r.json();if(!r.ok)throw new Error(j.detail);toast(`Added ${j.chunks} chunks from ${f.name}`);kb()}catch(x){toast('Upload failed: '+x.message)}e.target.value=''};
+async function kb(){try{const j=await (await fetch('/api/stats')).json();$('#kb').textContent=j.total+' chunks indexed'}catch(e){$('#kb').textContent='Server offline'}}
+(function(){let t;try{t=localStorage.getItem('theme')}catch(e){}document.documentElement.dataset.theme=t||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light')})();
+cur=chats[0]?.id;if(!cur)newChat();else draw();kb();
+</script>
+</body>
+</html>
