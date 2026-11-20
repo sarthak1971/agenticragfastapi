@@ -5,13 +5,12 @@ import io, json, os
 from typing import List, TypedDict
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from langgraph.graph import END, StateGraph
 from langchain_groq import ChatGroq
-# from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
@@ -20,9 +19,8 @@ load_dotenv()
 
 llm = ChatGroq(api_key=os.getenv("GROQ_API_KEY"), model="openai/gpt-oss-120b",
                temperature=0, max_tokens=2048)
-# embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-embeddings = FastEmbedEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2", cache_dir="./models")
+embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+
 SAMPLE = [
     "LangGraph is a library for building stateful, multi-actor applications with LLMs. It extends LangChain with the ability to coordinate multiple chains across multiple steps of computation in a cyclic manner.",
     "RAG (Retrieval-Augmented Generation) is a technique that combines information retrieval with text generation. It retrieves relevant documents and uses them to provide context for generating more accurate responses.",
@@ -33,7 +31,7 @@ vectorstore = FAISS.from_documents(
     [Document(page_content=t, metadata={"source": "sample-knowledge"}) for t in SAMPLE], embeddings)
 # Fix: as_retriever(k=3) is silently ignored; k belongs in search_kwargs
 retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
-splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
+DOCS = {"sample-knowledge": len(SAMPLE)}  # filename -> chunk count
 
 
 # ---- Your graph (same nodes/edges), plus chat history in the prompt ----
@@ -127,7 +125,7 @@ async def chat(body: ChatIn):
 
 
 @app.post("/api/upload")
-async def upload(file: UploadFile = File(...)):
+async def upload(file: UploadFile = File(...), chunk_size: int = Form(800), chunk_overlap: int = Form(100)):
     raw = await file.read()
     if file.filename.lower().endswith(".pdf"):
         from pypdf import PdfReader
@@ -136,14 +134,17 @@ async def upload(file: UploadFile = File(...)):
         text = raw.decode("utf-8", errors="ignore")
     if not text.strip():
         raise HTTPException(400, "No readable text found in this file.")
-    chunks = splitter.create_documents([text], metadatas=[{"source": file.filename}])
+    size = max(100, chunk_size)
+    sp = RecursiveCharacterTextSplitter(chunk_size=size, chunk_overlap=max(0, min(chunk_overlap, size // 2)))
+    chunks = sp.create_documents([text], metadatas=[{"source": file.filename}])
     vectorstore.add_documents(chunks)
+    DOCS[file.filename] = DOCS.get(file.filename, 0) + len(chunks)
     return {"chunks": len(chunks), "total": vectorstore.index.ntotal}
 
 
 @app.get("/api/stats")
 async def stats():
-    return {"total": vectorstore.index.ntotal}
+    return {"total": vectorstore.index.ntotal, "docs": [{"name": k, "chunks": v} for k, v in DOCS.items()]}
 
 
 @app.get("/")
