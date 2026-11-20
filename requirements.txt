@@ -5,9 +5,6 @@ python-dotenv
 pypdf
 langgraph
 langchain-groq
-langchain-huggingface
 langchain-community
 langchain-text-splitters
-faiss-cpu
-sentence-transformers
 fastembed
